@@ -1,0 +1,54 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fc5b8eb..bb31e44 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -132,6 +132,25 @@ elseif (WIN32)
+     ws2_32 synchronization shlwapi shcore dbghelp winmm ntdll -static)
+ endif ()
+ 
++#
++# Apply the same system / SDL / threading deps to the exodus_lex shared
++# library so it is self-contained for FFI consumers.
++#
++if (TARGET exodus_lex)
++  target_include_directories(exodus_lex PRIVATE ${SDL2_INCLUDE_DIRS})
++  target_link_libraries(exodus_lex PRIVATE m ${SDL2_LIBRARIES})
++  if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
++      CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
++    target_link_libraries(exodus_lex PRIVATE Threads::Threads rt)
++    if (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
++      target_link_libraries(exodus_lex PRIVATE procstat)
++    endif ()
++  elseif (WIN32)
++    target_link_libraries(exodus_lex PRIVATE
++      ws2_32 synchronization shlwapi shcore dbghelp winmm ntdll)
++  endif ()
++endif ()
++
+ 
+ if (BUILD_HCRT)
+   add_custom_target(HCRT
+@@ -140,3 +159,23 @@ if (BUILD_HCRT)
+     DEPENDS ${PROJECT_NAME}
+     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+ endif ()
++
++#
++# Smoke-test the C<->HolyC lexer bridge end-to-end. Runs exodus in
++# command-line mode against the demo and greps the output for the
++# expected token markers; this catches any regression in either the
++# C bridge (lex_ffi.c, ffi.c) or the HolyC declarations in KernelA.HH.
++#
++include(CTest)
++if (BUILD_TESTING AND BUILD_HCRT)
++  add_test(
++    NAME exodus_lex_bridge
++    COMMAND ${CMAKE_COMMAND}
++      -DEXODUS=$<TARGET_FILE:exodus>
++      -DSRCDIR=${CMAKE_CURRENT_SOURCE_DIR}
++      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunLexBridgeTest.cmake
++    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
++  set_tests_properties(exodus_lex_bridge PROPERTIES
++    LABELS "bridge;smoke"
++    TIMEOUT 60)
++endif ()

@@ -1,0 +1,16 @@
+*.swp
+*.orig
+*.rej
+build/
+haskell/dist-newstyle/
+haskell/dist/
+.ghc.environment.*
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.log
+*.log.*
+logs/
+log/

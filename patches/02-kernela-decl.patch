@@ -1,0 +1,26 @@
+diff --git a/T/KernelA.HH b/T/KernelA.HH
+index 6d4434d..7dceec2 100644
+--- a/T/KernelA.HH
++++ b/T/KernelA.HH
+@@ -7551,6 +7551,10 @@ import F64 Trunc(F64 d); //Truncate F64.
+ import F64 Exp(F64 d); //Exponential function.
+ import F64 Floor(F64 d); //Floor of F64.
+ import I64 HPET();
++//ExodusLex bridge, drives Lex, CmpCtrlNew and CmpCtrlDel through C and
++//hands back a pointer to a heap allocated ExodusLexResult. free it with ExodusLexFree.
++import U8 *ExodusLex(U8 *src);
++import U0 ExodusLexFree(U8 *res);
+ #else
+ extern U0 MPSetProfilerInt(U8*,U8*,I64);
+ extern U0 _GrPaletteColorSet(I64i,I64i);
+@@ -7659,6 +7663,10 @@ public extern F64 Trunc(F64 d); //Truncate F64.
+ public extern F64 Exp(F64 d); //Exponential function.
+ public extern F64 Floor(F64 d); //Floor of F64.
+ public extern I64 HPET();
++//ExodusLex bridge, drives Lex, CmpCtrlNew and CmpCtrlDel through C and
++//hands back a pointer to a heap allocated ExodusLexResult. free it with ExodusLexFree.
++public extern U8 *ExodusLex(U8 *src);
++public extern U0 ExodusLexFree(U8 *res);
+ #endif
+ #define DYAD_EVENT_LINE    #exe{StreamPrint("%d",_DyadGetCallbackMode("DYAD_EVENT_LINE"));}
+ #define DYAD_EVENT_DATA    #exe{StreamPrint("%d",_DyadGetCallbackMode("DYAD_EVENT_DATA"));}

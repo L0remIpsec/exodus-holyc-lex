@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.patch -text
+patches/* -text
+*.sh   text eol=lf
+*.ps1  text eol=crlf
+*.HC   text eol=lf
+*.HH   -text

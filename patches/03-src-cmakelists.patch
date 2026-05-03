@@ -1,0 +1,62 @@
+diff --git a/src/exodus/CMakeLists.txt b/src/exodus/CMakeLists.txt
+index bd3e28b..89d7ba0 100644
+--- a/src/exodus/CMakeLists.txt
++++ b/src/exodus/CMakeLists.txt
+@@ -7,6 +7,7 @@ set(SRC_FILES
+   window.c
+   loader.c
+   ffi.c
++  lex_ffi.c
+   tosprint.c
+   vfs.c
+   backtrace.c
+@@ -42,3 +43,49 @@ set_source_files_properties(${SRC_FILES}
+ add_executable(${PROJECT_NAME} ${SRC_FILES} ${ASM_FILES})
+ 
+ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
++
++#
++# Shared library exposing the HolyC lexer bridge (see lex_ffi.h) for use
++# from foreign-language bindings such as Haskell. Built from the same
++# sources as the executable so HCRT, FFI, and runtime state are present.
++#
++option(BUILD_EXODUS_LEX_SHARED
++  "Build libexodus_lex shared library for FFI consumers" ON)
++
++if (BUILD_EXODUS_LEX_SHARED)
++  add_library(exodus_lex SHARED ${SRC_FILES} ${ASM_FILES})
++
++  target_include_directories(exodus_lex
++    PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/.."
++    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
++
++  set_target_properties(exodus_lex
++    PROPERTIES
++      POSITION_INDEPENDENT_CODE ON
++      C_STANDARD 11
++      C_STANDARD_REQUIRED YES
++      C_EXTENSIONS YES
++      LINKER_LANGUAGE C
++      C_VISIBILITY_PRESET hidden
++      OUTPUT_NAME exodus_lex)
++
++  target_compile_definitions(exodus_lex PRIVATE _GNU_SOURCE=1)
++
++  target_compile_options(exodus_lex
++    PRIVATE
++      -m64
++      -Wall
++      -Wextra
++      -Werror=shadow
++      -fno-math-errno
++      -fno-trapping-math
++      -fno-exceptions
++      -fno-omit-frame-pointer
++      -fno-stack-protector
++      -fno-unwind-tables
++      -fno-asynchronous-unwind-tables
++      -fcf-protection=none
++      -fwrapv
++      -mno-shstk
++      -mno-red-zone)
++endif ()

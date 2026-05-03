@@ -1,0 +1,40 @@
+diff --git a/src/exodus/ffi.c b/src/exodus/ffi.c
+index d6c2709..6144022 100644
+--- a/src/exodus/ffi.c
++++ b/src/exodus/ffi.c
+@@ -14,6 +14,7 @@
+ 
+ #include <exodus/abi.h>
+ #include <exodus/alloc.h>
++#include <exodus/lex_ffi.h>
+ #include <exodus/loader.h>
+ #include <exodus/main.h>
+ #include <exodus/misc.h>
+@@ -531,6 +532,17 @@ static void STK_MPSetProfilerInt(i64 *stk) {
+   MPSetProfilerInt((void *)stk[0], stk[1], stk[2]);
+ }
+ 
++/* thunks that let HolyC reach the ExodusLex bridge.
++ * ExodusLex turns around and calls HolyC's Lex, CmpCtrlNew and CmpCtrlDel
++ * back through fficall, so it's fine to invoke from a HolyC core context. */
++static void *STK_ExodusLex(char **stk) {
++  return ExodusLex(stk[0]);
++}
++
++static void STK_ExodusLexFree(void **stk) {
++  ExodusLexFree((ExodusLexResult *)stk[0]);
++}
++
+ void BootstrapLoader(void) {
+ #define R(h, c, a) {.name = h, .fp = c, .arity = a}
+ #define S(h, a) \
+@@ -595,6 +607,9 @@ void BootstrapLoader(void) {
+       R("MemSetU8", STK_MemSet, 3),
+       S(StrCpy, 2),
+       S(StrCmp, 2),
++      /* HolyC side of the lexer bridge */
++      S(ExodusLex, 1),
++      S(ExodusLexFree, 1),
+       S(StrLen, 1),
+       S(Sqr, 1),
+       S(Sqrt, 1),
