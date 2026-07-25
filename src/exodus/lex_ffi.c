@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL.h>
+
 #include <exodus/abi.h>
 #include <exodus/ffi.h>
 #include <exodus/lex_ffi.h>
@@ -147,4 +149,93 @@ void ExodusLexFree(ExodusLexResult *res) {
     free(res->tokens[i].str);
   free(res->tokens);
   free(res);
+}
+
+/* ------------------------------------------------------------------ */
+/* standalone boot + remote requests                                   */
+/*                                                                     */
+/* HolyC only runs on threads Exodus made (their GS points at the      */
+/* CTask/CCPU context), so a foreign host can't call Lex directly.     */
+/* instead ExodusLexBoot runs the stock main() on its own thread with  */
+/* a boot script whose task sits in a poll loop, and ExodusLexRemote   */
+/* hands sources to that task through a one slot mailbox.              */
+
+int main(int argc, char **argv); /* the stock entry point, same DSO */
+
+static SDL_mutex *lex_slot_mu;   /* serializes remote callers */
+static SDL_sem *lex_req_sem;     /* posted when a request is placed */
+static SDL_sem *lex_done_sem;    /* posted when the request is served */
+static SDL_sem *lex_ready_sem;   /* posted once by the first poll */
+static char const *lex_req_src;
+static ExodusLexResult *lex_req_res;
+static int lex_boot_started, lex_live;
+
+static int lex_boot_thread(void *arg) {
+  char **argv = arg;
+  int argc = 0;
+  while (argv[argc])
+    argc++;
+  return main(argc, argv); /* EventLoop never returns */
+}
+
+int ExodusLexBoot(char const *t_root, char const *hcrt_bin) {
+  if (lex_boot_started)
+    return lex_live ? 0 : -1;
+  lex_boot_started = 1;
+  if (!t_root)
+    t_root = "T";
+  if (!hcrt_bin)
+    hcrt_bin = "HCRT.BIN";
+  lex_slot_mu = SDL_CreateMutex();
+  lex_req_sem = SDL_CreateSemaphore(0);
+  lex_done_sem = SDL_CreateSemaphore(0);
+  lex_ready_sem = SDL_CreateSemaphore(0);
+  if (!lex_slot_mu || !lex_req_sem || !lex_done_sem || !lex_ready_sem)
+    return -1;
+  static char *boot_argv[8];
+  boot_argv[0] = "exodus";
+  boot_argv[1] = "-c";
+  boot_argv[2] = "-t";
+  boot_argv[3] = strdup(t_root);
+  boot_argv[4] = "-f";
+  boot_argv[5] = strdup(hcrt_bin);
+  boot_argv[6] = "T:/Demo/ExodusLexServer.HC";
+  boot_argv[7] = NULL;
+  if (!boot_argv[3] || !boot_argv[5])
+    return -1;
+  SDL_Thread *th =
+      SDL_CreateThread(lex_boot_thread, "exodus_lex_boot", boot_argv);
+  if (!th)
+    return -1;
+  SDL_DetachThread(th);
+  /* HCRT boots in well under a second; 30s leaves room for cold disks */
+  if (SDL_SemWaitTimeout(lex_ready_sem, 30000) != 0)
+    return -1;
+  return 0;
+}
+
+ExodusLexResult *ExodusLexRemote(char const *src) {
+  if (!lex_live)
+    return NULL;
+  SDL_LockMutex(lex_slot_mu);
+  lex_req_src = src;
+  SDL_SemPost(lex_req_sem);
+  SDL_SemWait(lex_done_sem);
+  ExodusLexResult *res = lex_req_res;
+  lex_req_res = NULL;
+  SDL_UnlockMutex(lex_slot_mu);
+  return res;
+}
+
+i64 ExodusLexPoll(void) {
+  if (!lex_live) {
+    lex_live = 1;
+    if (lex_ready_sem)
+      SDL_SemPost(lex_ready_sem);
+  }
+  if (!lex_req_sem || SDL_SemTryWait(lex_req_sem) != 0)
+    return 0;
+  lex_req_res = ExodusLex(lex_req_src);
+  SDL_SemPost(lex_done_sem);
+  return 1;
 }

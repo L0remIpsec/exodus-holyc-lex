@@ -38,8 +38,32 @@ typedef struct ExodusLexResult {
 /* lex src (a zero terminated HolyC source string) and return a heap
  * allocated result with one entry per token. the last entry always has
  * .token == TK_EOF (0). returns NULL if the HolyC runtime hasn't been
- * loaded yet. caller owns the result and must hand it to ExodusLexFree. */
+ * loaded yet. caller owns the result and must hand it to ExodusLexFree.
+ * only call this from HolyC context (a task Exodus made), foreign
+ * threads go through ExodusLexRemote instead. */
 EXODUS_API ExodusLexResult *ExodusLex(char const *src);
 
 /* free a result previously returned by ExodusLex. safe to call on NULL. */
 EXODUS_API void ExodusLexFree(ExodusLexResult *res);
+
+/* boot a full Exodus runtime inside the calling process so that
+ * ExodusLexRemote works without an outer Exodus. runs the normal boot
+ * path in command line mode on its own thread, with t_root mounted as
+ * T:/ and hcrt_bin as the HolyC runtime image, then waits for the
+ * HolyC server loop (T/Demo/ExodusLexServer.HC) to come up. paths
+ * resolve against the host's working directory; NULL picks the usual
+ * "T" and "HCRT.BIN". one boot per process and there is no shutdown,
+ * the runtime lives until the process exits (and HolyC Exit/Shutdown
+ * ends the whole process). returns 0 on success. */
+EXODUS_API int ExodusLexBoot(char const *t_root, char const *hcrt_bin);
+
+/* lex src on the runtime's server task from any host thread. requests
+ * serialize through the one server task. returns NULL until
+ * ExodusLexBoot has succeeded. don't call this from HolyC code (it
+ * would deadlock the server task), use ExodusLex there. */
+EXODUS_API ExodusLexResult *ExodusLexRemote(char const *src);
+
+/* answers one pending ExodusLexRemote request, never blocks. returns 1
+ * if it served something, 0 when idle. registered with HolyC and driven
+ * by the server loop in T/Demo/ExodusLexServer.HC. */
+i64 ExodusLexPoll(void);

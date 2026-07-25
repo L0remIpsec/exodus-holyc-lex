@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index fc5b8eb..1495f78 100644
+index fc5b8eb..840a665 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -132,6 +132,33 @@ elseif (WIN32)
@@ -36,7 +36,7 @@ index fc5b8eb..1495f78 100644
  
  if (BUILD_HCRT)
    add_custom_target(HCRT
-@@ -140,3 +167,23 @@ if (BUILD_HCRT)
+@@ -140,3 +167,33 @@ if (BUILD_HCRT)
      DEPENDS ${PROJECT_NAME}
      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
  endif ()
@@ -59,4 +59,14 @@ index fc5b8eb..1495f78 100644
 +  set_tests_properties(exodus_lex_bridge PROPERTIES
 +    LABELS "bridge;smoke"
 +    TIMEOUT 60)
++  if (TARGET exodus_lex_host)
++    add_test(
++      NAME exodus_lex_host
++      COMMAND $<TARGET_FILE:exodus_lex_host> T HCRT.BIN
++      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
++    set_tests_properties(exodus_lex_host PROPERTIES
++      PASS_REGULAR_EXPRESSION "EXODUS_LEX_HOST_OK"
++      LABELS "bridge;smoke"
++      TIMEOUT 60)
++  endif ()
 +endif ()

@@ -1,5 +1,5 @@
 diff --git a/src/exodus/CMakeLists.txt b/src/exodus/CMakeLists.txt
-index bd3e28b..89d7ba0 100644
+index bd3e28b..87724dd 100644
 --- a/src/exodus/CMakeLists.txt
 +++ b/src/exodus/CMakeLists.txt
 @@ -7,6 +7,7 @@ set(SRC_FILES
@@ -10,7 +10,7 @@ index bd3e28b..89d7ba0 100644
    tosprint.c
    vfs.c
    backtrace.c
-@@ -42,3 +43,49 @@ set_source_files_properties(${SRC_FILES}
+@@ -42,3 +43,54 @@ set_source_files_properties(${SRC_FILES}
  add_executable(${PROJECT_NAME} ${SRC_FILES} ${ASM_FILES})
  
  target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -59,4 +59,9 @@ index bd3e28b..89d7ba0 100644
 +      -fwrapv
 +      -mno-shstk
 +      -mno-red-zone)
++
++  # host side consumer of the shared lib, exercised by ctest. links the
++  # library exactly the way a foreign binding would.
++  add_executable(exodus_lex_host lex_host_test.c)
++  target_link_libraries(exodus_lex_host PRIVATE exodus_lex)
 +endif ()

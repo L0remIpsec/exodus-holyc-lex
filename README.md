@@ -12,6 +12,10 @@ it adds one C function to Exodus
 ```c
 ExodusLexResult *ExodusLex(char const *src);
 void             ExodusLexFree(ExodusLexResult *res);
+
+// standalone hosts: boot a full runtime in-process, then lex from any thread
+int              ExodusLexBoot(char const *t_root, char const *hcrt_bin);
+ExodusLexResult *ExodusLexRemote(char const *src);
 ```
 
 that hands the source string to HolyC's own `Lex` (through `CmpCtrlNew`
@@ -44,7 +48,9 @@ lexer from outside HolyC too.
 ```
 src/exodus/lex_ffi.h       the C API
 src/exodus/lex_ffi.c       implementation, talks to HolyC's Lex
+src/exodus/lex_host_test.c ctest host that links the shared lib like a binding would
 T/Demo/ExodusLexDemo.HC    HolyC demo, declares the matching classes
+T/Demo/ExodusLexServer.HC  server loop that answers ExodusLexRemote requests
 cmake/RunLexBridgeTest.cmake  ctest harness for the demo
 haskell/Exodus/Lex.hs      Haskell bindings (Storable struct peek)
 haskell/exodus-lex.cabal   cabal file for the bindings package
@@ -53,10 +59,10 @@ patches/                   four small unified diffs against upstream
 
 the patches are tiny
 
-* `01-ffi-register.patch`     two `STK_*` thunks plus `S(ExodusLex,1), S(ExodusLexFree,1)` in `ffi.c`
+* `01-ffi-register.patch`     `STK_*` thunks plus `S(ExodusLex,1), S(ExodusLexFree,1)` and the `ExodusLexPoll` hook in `ffi.c`
 * `02-kernela-decl.patch`     `import` and `public extern` lines in `T/KernelA.HH` next to `HPET`
-* `03-src-cmakelists.patch`   adds `lex_ffi.c` to the executable and an optional `libexodus_lex` shared lib (`BUILD_EXODUS_LEX_SHARED`, default ON)
-* `04-root-cmakelists.patch`  wires SDL2, platform deps and the vendor static libs (dyad, argtable3, vec, isocline, map, built as PIC) into the shared lib and registers the ctest
+* `03-src-cmakelists.patch`   adds `lex_ffi.c` to the executable, an optional `libexodus_lex` shared lib (`BUILD_EXODUS_LEX_SHARED`, default ON) and the host test exe
+* `04-root-cmakelists.patch`  wires SDL2, platform deps and the vendor static libs (dyad, argtable3, vec, isocline, map, built as PIC) into the shared lib and registers the ctests
 
 ## installing
 
@@ -69,7 +75,9 @@ cd ~/EXODUS
 # drop in the new files
 cp ../exodus-holyc-lex/src/exodus/lex_ffi.h   src/exodus/
 cp ../exodus-holyc-lex/src/exodus/lex_ffi.c   src/exodus/
+cp ../exodus-holyc-lex/src/exodus/lex_host_test.c src/exodus/
 cp ../exodus-holyc-lex/T/Demo/ExodusLexDemo.HC T/Demo/
+cp ../exodus-holyc-lex/T/Demo/ExodusLexServer.HC T/Demo/
 cp ../exodus-holyc-lex/cmake/RunLexBridgeTest.cmake cmake/
 
 # apply the four patches
@@ -127,12 +135,17 @@ import qualified Exodus.Lex as Lex
 
 main :: IO ()
 main = do
-  -- the calling process must be Exodus itself, or a host that has
-  -- already run BootstrapLoader so HCRT is live in memory
-  result <- Lex.lex "I64 x = 42;"
-  case result of
-    Nothing  -> putStrLn "HCRT not loaded"
-    Just tks -> mapM_ print tks
+  -- boots a full Exodus runtime inside this process. paths resolve
+  -- against the cwd, so run from your Exodus checkout (where T/ and
+  -- HCRT.BIN live). one boot per process, no shutdown.
+  up <- Lex.boot "T" "HCRT.BIN"
+  if not up
+    then putStrLn "boot failed"
+    else do
+      result <- Lex.lex "I64 x = 42;"
+      case result of
+        Nothing  -> putStrLn "runtime not up"
+        Just tks -> mapM_ print tks
 ```
 
 `Lex.lex` and `Lex.withLex` peek the C struct directly through a
@@ -140,19 +153,16 @@ main = do
 
 ## a couple of caveats
 
-* HCRT has to be loaded in the calling process before `ExodusLex` can
-  resolve `CmpCtrlNew`, `Lex` and `CmpCtrlDel`. in practice that means
-  the consumer is Exodus itself, or an embedder that has already run
-  Exodus's bootstrap path.
-* `libexodus_lex` carries its own copy of the whole runtime (own symtab,
-  own globals) and does not yet export a way to boot it. a standalone
-  host that links it and calls `ExodusLex` just gets `NULL` back. until
-  a boot API exists, the HolyC route inside a running Exodus is the one
-  that works end to end.
-* HolyC code only runs on Exodus "seth" core threads, whose GS segment
-  points at the CTask/CCPU context. don't call `ExodusLex` from an
-  arbitrary foreign thread of a live runtime; route it through HolyC
-  (the registered `ExodusLex` symbol) or a thread Exodus created.
+* two ways in: HolyC code inside Exodus calls `ExodusLex` directly, a
+  standalone host links `libexodus_lex`, calls `ExodusLexBoot` once and
+  then `ExodusLexRemote` from whatever thread it likes. don't mix them
+  up: `ExodusLexRemote` from HolyC would deadlock the server task, and
+  `ExodusLex` from a foreign thread would crash (HolyC only runs on
+  threads Exodus made, their GS points at the CTask/CCPU context).
+* `ExodusLexBoot` runs the whole runtime in your process: one boot per
+  process, no shutdown, requests serialize through one server task, and
+  HolyC `Exit`/`Shutdown` ends the host process. the boot also prints
+  the usual HCRT chatter to stdout.
 * token ids below 0x100 are single chars and minor punctuation, ids at
   or above 0x100 are the `TK_*` enum from `T/KernelA.HH`. the bridge
   only fills the payload fields for the ones that have one

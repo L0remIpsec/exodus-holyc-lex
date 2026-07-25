@@ -3,9 +3,10 @@
 -- Description : Haskell bindings to Exodus's HolyC lexer bridge
 --
 -- drives the HolyC Lex routine through Exodus's ExodusLex C wrapper and
--- returns the full token stream as a list. the Exodus runtime has to
--- have loaded HCRT (BootstrapLoader has run and HolyC is live) before
--- you call any of these.
+-- returns the full token stream as a list. call 'boot' once to bring a
+-- full Exodus runtime up inside the process, after that 'lex' and
+-- 'withLex' hand sources to its HolyC server task and block until the
+-- tokens come back.
 --
 -- link against libexodus_lex (built by the Exodus CMake project with
 -- BUILD_EXODUS_LEX_SHARED=ON, which is the default) by way of
@@ -17,11 +18,13 @@ module Exodus.Lex
   ( -- * high level
     Token(..)
   , TokenKind(..)
+  , boot
   , lex
   , withLex
     -- * raw bindings
   , ExodusLexResultPtr
-  , c_ExodusLex
+  , c_ExodusLexBoot
+  , c_ExodusLexRemote
   , c_ExodusLexFree
   ) where
 
@@ -30,7 +33,7 @@ import           Prelude            hiding (lex)
 import           Control.Exception  (bracket)
 import           Data.Int           (Int64)
 import           Foreign.C.String   (CString, peekCStringLen, withCString)
-import           Foreign.C.Types    (CDouble (..), CSize (..))
+import           Foreign.C.Types    (CDouble (..), CInt (..), CSize (..))
 import           Foreign.Marshal.Array (peekArray)
 import           Foreign.Ptr        (Ptr, nullPtr)
 import           Foreign.Storable   (Storable (..))
@@ -94,11 +97,14 @@ type ExodusLexResultPtr = Ptr ()
 ------------------------------------------------------------------------
 -- raw FFI
 
--- ExodusLex re-enters the HolyC compiler, which can run for a while and
--- must not stall the GHC runtime, so it's a safe call. ExodusLexFree is
--- plain C frees and can stay unsafe.
-foreign import ccall safe "ExodusLex"
-  c_ExodusLex     :: CString -> IO ExodusLexResultPtr
+-- boot blocks until HCRT is up and lexing re-enters the HolyC compiler,
+-- neither may stall the GHC runtime, so they're safe calls.
+-- ExodusLexFree is plain C frees and can stay unsafe.
+foreign import ccall safe "ExodusLexBoot"
+  c_ExodusLexBoot :: CString -> CString -> IO CInt
+
+foreign import ccall safe "ExodusLexRemote"
+  c_ExodusLexRemote :: CString -> IO ExodusLexResultPtr
 
 foreign import ccall unsafe "ExodusLexFree"
   c_ExodusLexFree :: ExodusLexResultPtr -> IO ()
@@ -115,8 +121,19 @@ tkI64       = 0x102
 tkCharConst = 0x103
 tkF64       = 0x104
 
+-- | boot the in-process Exodus runtime. @boot root bin@ mounts @root@
+-- as T:/ and loads the HolyC image @bin@, both resolved against the
+-- current working directory. call it once; True means the runtime is
+-- up (again). there is no shutdown, the runtime lives until the
+-- process exits.
+boot :: FilePath -> FilePath -> IO Bool
+boot root bin =
+  withCString root $ \croot ->
+    withCString bin $ \cbin ->
+      (== 0) <$> c_ExodusLexBoot croot cbin
+
 -- | lex some HolyC source and return every token, minus the trailing
--- TK_EOF. returns @Nothing@ if the HolyC runtime isn't loaded.
+-- TK_EOF. returns @Nothing@ if 'boot' hasn't succeeded yet.
 lex :: String -> IO (Maybe [Token])
 lex src = withLex src return
 
@@ -125,7 +142,7 @@ lex src = withLex src return
 withLex :: String -> ([Token] -> IO a) -> IO (Maybe a)
 withLex src k =
   withCString src $ \csrc ->
-    bracket (c_ExodusLex csrc) freeIfNotNull $ \resPtr ->
+    bracket (c_ExodusLexRemote csrc) freeIfNotNull $ \resPtr ->
       if resPtr == nullPtr
         then return Nothing
         else do

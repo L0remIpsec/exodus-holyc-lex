@@ -1,5 +1,5 @@
 diff --git a/src/exodus/ffi.c b/src/exodus/ffi.c
-index d6c2709..6144022 100644
+index d6c2709..f2ecebc 100644
 --- a/src/exodus/ffi.c
 +++ b/src/exodus/ffi.c
 @@ -14,6 +14,7 @@
@@ -28,13 +28,14 @@ index d6c2709..6144022 100644
  void BootstrapLoader(void) {
  #define R(h, c, a) {.name = h, .fp = c, .arity = a}
  #define S(h, a) \
-@@ -595,6 +607,9 @@ void BootstrapLoader(void) {
+@@ -595,6 +607,10 @@ void BootstrapLoader(void) {
        R("MemSetU8", STK_MemSet, 3),
        S(StrCpy, 2),
        S(StrCmp, 2),
 +      /* HolyC side of the lexer bridge */
 +      S(ExodusLex, 1),
 +      S(ExodusLexFree, 1),
++      R("ExodusLexPoll", ExodusLexPoll, 0),
        S(StrLen, 1),
        S(Sqr, 1),
        S(Sqrt, 1),
