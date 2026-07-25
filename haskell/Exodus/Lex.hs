@@ -29,7 +29,7 @@ import           Prelude            hiding (lex)
 
 import           Control.Exception  (bracket)
 import           Data.Int           (Int64)
-import           Foreign.C.String   (CString, peekCString, withCString)
+import           Foreign.C.String   (CString, peekCStringLen, withCString)
 import           Foreign.C.Types    (CDouble (..), CSize (..))
 import           Foreign.Marshal.Array (peekArray)
 import           Foreign.Ptr        (Ptr, nullPtr)
@@ -61,15 +61,16 @@ data Token = Token
 
 -- | mirrors @struct ExodusToken@ from src/exodus/lex_ffi.h.
 data CExodusToken = CExodusToken
-  { ctTok  :: !Int64
-  , ctLine :: !Int64
-  , ctI64  :: !Int64
-  , ctF64  :: !Double
-  , ctStr  :: !CString
+  { ctTok    :: !Int64
+  , ctLine   :: !Int64
+  , ctI64    :: !Int64
+  , ctF64    :: !Double
+  , ctStr    :: !CString
+  , ctStrLen :: !Int64
   }
 
 instance Storable CExodusToken where
-  sizeOf    _ = 8 * 5
+  sizeOf    _ = 8 * 6
   alignment _ = 8
   peek p = CExodusToken
     <$> peekByteOff p 0
@@ -77,12 +78,14 @@ instance Storable CExodusToken where
     <*> peekByteOff p 16
     <*> (realToFrac <$> (peekByteOff p 24 :: IO CDouble))
     <*> peekByteOff p 32
+    <*> peekByteOff p 40
   poke p CExodusToken{..} = do
     pokeByteOff p 0  ctTok
     pokeByteOff p 8  ctLine
     pokeByteOff p 16 ctI64
     pokeByteOff p 24 (realToFrac ctF64 :: CDouble)
     pokeByteOff p 32 ctStr
+    pokeByteOff p 40 ctStrLen
 
 -- | opaque pointer to @struct ExodusLexResult@. layout is
 --   { ExodusToken *tokens; size_t count; }
@@ -91,7 +94,10 @@ type ExodusLexResultPtr = Ptr ()
 ------------------------------------------------------------------------
 -- raw FFI
 
-foreign import ccall unsafe "ExodusLex"
+-- ExodusLex re-enters the HolyC compiler, which can run for a while and
+-- must not stall the GHC runtime, so it's a safe call. ExodusLexFree is
+-- plain C frees and can stay unsafe.
+foreign import ccall safe "ExodusLex"
   c_ExodusLex     :: CString -> IO ExodusLexResultPtr
 
 foreign import ccall unsafe "ExodusLexFree"
@@ -148,11 +154,13 @@ decode CExodusToken{..} = do
       | t == tkI64       -> pure (TkI64  ctI64)
       | t == tkCharConst -> pure (TkChar ctI64)
       | t == tkF64       -> pure (TkF64  ctF64)
-      | t == tkIdent     -> TkIdent <$> peekStr ctStr
-      | t == tkStr       -> TkStr   <$> peekStr ctStr
+      | t == tkIdent     -> TkIdent <$> peekStr
+      | t == tkStr       -> TkStr   <$> peekStr
       | otherwise        -> pure (TkOther t)
   pure Token { tokenKind = kind, tokenLine = ctLine, tokenRaw = ctTok }
   where
-    peekStr s
-      | s == nullPtr = pure ""
-      | otherwise    = peekCString s
+    -- read exactly str_len bytes; TK_STR payloads may contain embedded
+    -- NULs (\0 and \xNN escapes) that a plain peekCString would drop.
+    peekStr
+      | ctStr == nullPtr = pure ""
+      | otherwise        = peekCStringLen (ctStr, fromIntegral ctStrLen)

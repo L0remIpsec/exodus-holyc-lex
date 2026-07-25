@@ -14,6 +14,7 @@ class ExodusToken
   I64 i64_val;   // payload for TK_I64 and TK_CHAR_CONST
   F64 f64_val;   // payload for TK_F64
   U8 *str;       // payload for TK_IDENT and TK_STR, heap or NULL
+  I64 str_len;   // payload bytes in str, embedded NULs included
 };
 
 class ExodusLexResult
@@ -40,7 +41,7 @@ U0 ExodusLexDemo(U8 *src=NULL)
     switch (t->token) {
       case TK_EOF:        "EOF";                  break;
       case TK_IDENT:      "IDENT:%s",t->str;      break;
-      case TK_STR:        "STR:%s",t->str;        break;
+      case TK_STR:        "STR(%d):%s",t->str_len,t->str; break;
       case TK_I64:        "I64:%d",t->i64_val;    break;
       case TK_CHAR_CONST: "CHAR:%d",t->i64_val;   break;
       case TK_F64:        "F64:%f",t->f64_val;    break;
@@ -52,3 +53,7 @@ U0 ExodusLexDemo(U8 *src=NULL)
 }
 
 ExodusLexDemo;
+// embedded NUL round trip: the lexed source is `"a\0b";` so the TK_STR
+// payload is 3 bytes with a NUL in the middle. %s stops at the NUL but
+// str_len still reports all of it.
+ExodusLexDemo("\"a\\0b\";");

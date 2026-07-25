@@ -77,14 +77,21 @@ ExodusLexResult *ExodusLex(char const *src) {
   size_t cap = 64;
   res->tokens = calloc(cap, sizeof *res->tokens);
   res->count = 0;
+  if (!res->tokens) {
+    fficall(fp_del, cc);
+    free(res);
+    return NULL;
+  }
 
   for (;;) {
     i64 tk = fficall(fp_lex, cc);
     if (res->count == cap) {
+      ExodusToken *grown = realloc(res->tokens, 2 * cap * sizeof *res->tokens);
+      if (!grown)
+        goto oom;
+      res->tokens = grown;
+      memset(res->tokens + cap, 0, cap * sizeof *res->tokens);
       cap *= 2;
-      res->tokens = realloc(res->tokens, cap * sizeof *res->tokens);
-      memset(res->tokens + res->count, 0,
-             (cap - res->count) * sizeof *res->tokens);
     }
     ExodusToken *out = &res->tokens[res->count++];
     out->token = tk;
@@ -99,8 +106,23 @@ ExodusLexResult *ExodusLex(char const *src) {
       break;
     case TK_IDENT:
     case TK_STR:
-      if (cc->cur_str)
-        out->str = strdup((char const *)cc->cur_str);
+      if (cc->cur_str) {
+        /* cur_str_len counts the trailing NUL for TK_STR but not for
+         * TK_IDENT. normalize to payload bytes; the payload itself may
+         * hold embedded NULs (\0 and \xNN escapes), so copy by length
+         * and append our own terminator. */
+        i64 plen = cc->cur_str_len;
+        if (tk == TK_STR && plen > 0)
+          plen--;
+        if (plen < 0)
+          plen = 0;
+        out->str = malloc((size_t)plen + 1);
+        if (!out->str)
+          goto oom;
+        memcpy(out->str, cc->cur_str, (size_t)plen);
+        out->str[plen] = 0;
+        out->str_len = plen;
+      }
       break;
     default:
       break;
@@ -111,6 +133,11 @@ ExodusLexResult *ExodusLex(char const *src) {
 
   fficall(fp_del, cc);
   return res;
+
+oom:
+  fficall(fp_del, cc);
+  ExodusLexFree(res);
+  return NULL;
 }
 
 void ExodusLexFree(ExodusLexResult *res) {

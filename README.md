@@ -24,6 +24,7 @@ typedef struct ExodusToken {
   i64 i64_val;   // payload for TK_I64 and TK_CHAR_CONST
   f64 f64_val;   // payload for TK_F64
   char *str;     // payload for TK_IDENT and TK_STR, heap or NULL
+  i64 str_len;   // payload bytes in str, embedded NULs included
 } ExodusToken;
 
 typedef struct ExodusLexResult {
@@ -55,7 +56,7 @@ the patches are tiny
 * `01-ffi-register.patch`     two `STK_*` thunks plus `S(ExodusLex,1), S(ExodusLexFree,1)` in `ffi.c`
 * `02-kernela-decl.patch`     `import` and `public extern` lines in `T/KernelA.HH` next to `HPET`
 * `03-src-cmakelists.patch`   adds `lex_ffi.c` to the executable and an optional `libexodus_lex` shared lib (`BUILD_EXODUS_LEX_SHARED`, default ON)
-* `04-root-cmakelists.patch`  wires SDL2 and platform deps into the shared lib and registers the ctest
+* `04-root-cmakelists.patch`  wires SDL2, platform deps and the vendor static libs (dyad, argtable3, vec, isocline, map, built as PIC) into the shared lib and registers the ctest
 
 ## installing
 
@@ -143,12 +144,25 @@ main = do
   resolve `CmpCtrlNew`, `Lex` and `CmpCtrlDel`. in practice that means
   the consumer is Exodus itself, or an embedder that has already run
   Exodus's bootstrap path.
+* `libexodus_lex` carries its own copy of the whole runtime (own symtab,
+  own globals) and does not yet export a way to boot it. a standalone
+  host that links it and calls `ExodusLex` just gets `NULL` back. until
+  a boot API exists, the HolyC route inside a running Exodus is the one
+  that works end to end.
+* HolyC code only runs on Exodus "seth" core threads, whose GS segment
+  points at the CTask/CCPU context. don't call `ExodusLex` from an
+  arbitrary foreign thread of a live runtime; route it through HolyC
+  (the registered `ExodusLex` symbol) or a thread Exodus created.
 * token ids below 0x100 are single chars and minor punctuation, ids at
   or above 0x100 are the `TK_*` enum from `T/KernelA.HH`. the bridge
   only fills the payload fields for the ones that have one
   (`TK_I64`, `TK_CHAR_CONST`, `TK_F64`, `TK_IDENT`, `TK_STR`).
-* the result, including every `str` payload, is plain `malloc`/`strdup`
-  on the C heap. always release it through `ExodusLexFree`.
+* HolyC string literals may contain embedded NULs (`\0` and `\xNN`
+  escapes), so don't walk `str` with `strlen`: `str_len` holds the exact
+  payload size. the bridge still NUL terminates `str` on top so the
+  common case stays printable.
+* the result, including every `str` payload, is plain `malloc` on the C
+  heap. always release it through `ExodusLexFree`.
 
 ## license
 

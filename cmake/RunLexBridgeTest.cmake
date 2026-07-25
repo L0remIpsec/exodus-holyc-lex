@@ -28,15 +28,19 @@ if (NOT rc EQUAL 0)
   message(FATAL_ERROR "exodus exited with ${rc}")
 endif ()
 
-# markers produced by T/Demo/ExodusLexDemo.HC for the input
-# 'I64 x=42; F64 pi=3.14; "hello";'. if any of these go missing, either
-# the C bridge, the FFI registration or the HolyC declarations regressed.
+# markers produced by T/Demo/ExodusLexDemo.HC. the first run lexes
+# 'I64 x=42; F64 pi=3.14; "hello";', the second lexes '"a\0b";' to prove
+# embedded NULs survive with an exact str_len. if any of these go
+# missing, either the C bridge, the FFI registration or the HolyC
+# declarations regressed.
 foreach (needle
     "Tokens : 18"
     "IDENT:I64"
     "IDENT:x"
     "I64:42"
-    "STR:hello"
+    "STR(5):hello"
+    "Tokens : 3"
+    "STR(3):a"
     "tok=0x000")
   string(FIND "${combined}" "${needle}" pos)
   if (pos LESS 0)

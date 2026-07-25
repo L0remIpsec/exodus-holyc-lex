@@ -24,6 +24,10 @@ typedef struct ExodusToken {
   i64 i64_val;   /* payload for TK_I64 and TK_CHAR_CONST */
   f64 f64_val;   /* payload for TK_F64 */
   char *str;     /* payload for TK_IDENT and TK_STR, heap or NULL */
+  i64 str_len;   /* payload bytes in str, excluding the trailing NUL the
+                  * bridge always appends. HolyC string literals may hold
+                  * embedded NULs (\0 and \xNN escapes), so read str with
+                  * str_len instead of strlen when that matters. */
 } ExodusToken;
 
 typedef struct ExodusLexResult {
