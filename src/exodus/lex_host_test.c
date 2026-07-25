@@ -10,8 +10,9 @@
 
 #include <exodus/lex_ffi.h>
 
-#define TK_STR 0x101
-#define TK_I64 0x102
+#define TK_IDENT 0x100
+#define TK_STR   0x101
+#define TK_I64   0x102
 
 int main(int argc, char **argv) {
   char const *root = argc > 1 ? argv[1] : "T";
@@ -32,13 +33,15 @@ int main(int argc, char **argv) {
       ok |= 1;
     if (t->token == TK_STR && t->str_len == 3 && !memcmp(t->str, "a\0b", 4))
       ok |= 2;
+    if (t->token == TK_IDENT && t->str_len == 3 && !memcmp(t->str, "I64", 4))
+      ok |= 4;
   }
   printf("count=%zu ok=%d\n", res->count, ok);
   ExodusLexFree(res);
-  if (ok == 3)
+  if (ok == 7)
     puts("EXODUS_LEX_HOST_OK");
   fflush(stdout);
   /* the runtime has no shutdown, so leave without running atexit
    * handlers or waiting on its threads */
-  _Exit(ok == 3 ? 0 : 1);
+  _Exit(ok == 7 ? 0 : 1);
 }

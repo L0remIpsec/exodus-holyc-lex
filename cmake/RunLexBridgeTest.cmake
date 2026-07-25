@@ -35,8 +35,8 @@ endif ()
 # declarations regressed.
 foreach (needle
     "Tokens : 18"
-    "IDENT:I64"
-    "IDENT:x"
+    "IDENT(3):I64"
+    "IDENT(1):x"
     "I64:42"
     "STR(5):hello"
     "Tokens : 3"

@@ -40,7 +40,7 @@ U0 ExodusLexDemo(U8 *src=NULL)
     "  [%03d] line=%d tok=0x%03X ",i,t->line,t->token;
     switch (t->token) {
       case TK_EOF:        "EOF";                  break;
-      case TK_IDENT:      "IDENT:%s",t->str;      break;
+      case TK_IDENT:      "IDENT(%d):%s",t->str_len,t->str; break;
       case TK_STR:        "STR(%d):%s",t->str_len,t->str; break;
       case TK_I64:        "I64:%d",t->i64_val;    break;
       case TK_CHAR_CONST: "CHAR:%d",t->i64_val;   break;

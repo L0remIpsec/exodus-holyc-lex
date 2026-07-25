@@ -109,15 +109,14 @@ ExodusLexResult *ExodusLex(char const *src) {
     case TK_IDENT:
     case TK_STR:
       if (cc->cur_str) {
-        /* cur_str_len counts the trailing NUL for TK_STR but not for
-         * TK_IDENT. normalize to payload bytes; the payload itself may
-         * hold embedded NULs (\0 and \xNN escapes), so copy by length
-         * and append our own terminator. */
+        /* cur_str_len counts the trailing NUL for both TK_IDENT and
+         * TK_STR (LEX.HC does buf[i++]=0 before setting it). normalize
+         * to payload bytes; the payload itself may hold embedded NULs
+         * (\0 and \xNN escapes), so copy by length and append our own
+         * terminator. */
         i64 plen = cc->cur_str_len;
-        if (tk == TK_STR && plen > 0)
+        if (plen > 0)
           plen--;
-        if (plen < 0)
-          plen = 0;
         out->str = malloc((size_t)plen + 1);
         if (!out->str)
           goto oom;
