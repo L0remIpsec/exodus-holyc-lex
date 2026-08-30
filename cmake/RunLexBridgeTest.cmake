@@ -29,18 +29,21 @@ if (NOT rc EQUAL 0)
 endif ()
 
 # markers produced by T/Demo/ExodusLexDemo.HC. the first run lexes
-# 'I64 x=42; F64 pi=3.14; "hello";', the second lexes '"a\0b";' to prove
-# embedded NULs survive with an exact str_len. if any of these go
-# missing, either the C bridge, the FFI registration or the HolyC
-# declarations regressed.
+# 'I64 x=42; F64 f=3.14; "hello";', the second lexes '"a\0b";' to prove
+# embedded NULs survive with an exact str_len, the third lexes 'F64 d=pi;'
+# where pi is a KernelA.HH define that Lex expands to a bit pattern cast.
+# if any of these go missing, either the C bridge, the FFI registration
+# or the HolyC declarations regressed.
 foreach (needle
-    "Tokens : 18"
+    "Tokens : 13"
     "IDENT(3):I64"
     "IDENT(1):x"
     "I64:42"
+    "F64:3.14000"
     "STR(5):hello"
     "Tokens : 3"
     "STR(3):a"
+    "I64:4614256656552045848"
     "tok=0x000")
   string(FIND "${combined}" "${needle}" pos)
   if (pos LESS 0)

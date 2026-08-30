@@ -180,6 +180,12 @@ main = do
   or above 0x100 are the `TK_*` enum from `T/KernelA.HH`. the bridge
   only fills the payload fields for the ones that have one
   (`TK_I64`, `TK_CHAR_CONST`, `TK_F64`, `TK_IDENT`, `TK_STR`).
+* `Lex` expands defines, so a define never reaches you as an
+  identifier. `pi` is the one that catches people out, `KernelA.HH` has
+  it as `#define pi (0x400921FB54442D18(F64))` and that is what comes
+  back, six tokens with the bit pattern sitting in the middle as a
+  plain `TK_I64`. HolyC sets `CCF_NO_DEFINES` when it wants raw
+  identifiers, the bridge does not.
 * HolyC string literals may contain embedded NULs (`\0` and `\xNN`
   escapes), so don't walk `str` with `strlen`: `str_len` holds the exact
   payload size. the bridge still NUL terminates `str` on top so the

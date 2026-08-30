@@ -26,7 +26,7 @@ class ExodusLexResult
 U0 ExodusLexDemo(U8 *src=NULL)
 {
   if (!src)
-    src="I64 x=42; F64 pi=3.14; \"hello\";";
+    src="I64 x=42; F64 f=3.14; \"hello\";";
   ExodusLexResult *res=ExodusLex(src);
   if (!res) {
     "ExodusLex returned NULL (HCRT not loaded?)\n";
@@ -44,7 +44,7 @@ U0 ExodusLexDemo(U8 *src=NULL)
       case TK_STR:        "STR(%d):%s",t->str_len,t->str; break;
       case TK_I64:        "I64:%d",t->i64_val;    break;
       case TK_CHAR_CONST: "CHAR:%d",t->i64_val;   break;
-      case TK_F64:        "F64:%f",t->f64_val;    break;
+      case TK_F64:        "F64:%5.5f",t->f64_val; break;
       default:            "OTHER";                break;
     }
     '\n';
@@ -57,3 +57,6 @@ ExodusLexDemo;
 // payload is 3 bytes with a NUL in the middle. %s stops at the NUL but
 // str_len still reports all of it.
 ExodusLexDemo("\"a\\0b\";");
+// Lex expands defines, so pi never reaches you as an identifier, it
+// arrives as the (0x400921FB54442D18(F64)) it is declared to be.
+ExodusLexDemo("F64 d=pi;");
