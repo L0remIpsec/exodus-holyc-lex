@@ -117,10 +117,20 @@ ExodusLexDemo("I64 x=42; F64 pi=3.14; \"hello\";");
 ```
 
 keep that one in a file and include the file. typed straight at the GUI
-command line the escaped quotes can get chewed up before the compiler
-ever sees them, which surfaces as a parse error sitting on a `"` or an
-include path that grew a trailing slash. CLI mode (`exodus -c`) takes
-the same line verbatim.
+command line the quoting tends to come apart, and when it does the
+`#include` string never closes, so the filename swallows the rest of the
+line and the newline with it. that is what the pile of
+
+```
+ERROR: Invalid FileName: "ExodusLexDemo"; ExodusLexDemo("I64 x=42;");;
+.HC".
+```
+
+errors means: the `.HC` on the next line is just the extension being
+appended to a filename that ran away. four of those (`.HC` and `.HC.Z`,
+twice each) then a `File not found` is the signature. nothing is wrong
+with the bridge when you see it. CLI mode (`exodus -c`) takes the same
+line verbatim.
 
 or from your own HolyC code, after declaring the two classes (copy them
 out of `T/Demo/ExodusLexDemo.HC`)
