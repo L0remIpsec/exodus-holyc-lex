@@ -10,6 +10,7 @@
 #include <exodus/ffi.h>
 #include <exodus/lex_ffi.h>
 #include <exodus/loader.h>
+#include <exodus/shims.h>
 #include <exodus/types.h>
 
 /* token ids copied from KernelA.HH so we don't have to drag HolyC headers in */
@@ -170,6 +171,11 @@ static ExodusLexResult *lex_req_res;
 static int lex_boot_started, lex_live;
 
 static int lex_boot_thread(void *arg) {
+  /* SDL starts its threads with signals blocked and everything Exodus
+   * spawns inherits that mask, which would leave the POSIX PIT thread
+   * unable to take SIGALRM. jiffies would stop and HolyC Sleep would
+   * never wake. no-op on Windows. */
+  unblocksigs();
   char **argv = arg;
   int argc = 0;
   while (argv[argc])
