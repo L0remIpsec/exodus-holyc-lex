@@ -102,12 +102,25 @@ the Haskell side links against.
 
 ## using it from HolyC
 
-inside Exodus
+inside Exodus the demo runs itself when you include it, so this on its
+own is the whole thing
 
 ```holyc
-#include "::/Demo/ExodusLexDemo";   // pulls in the class decls and a runner
+#include "::/Demo/ExodusLexDemo";
+```
+
+you get two token dumps out of it, the default source and an embedded
+NUL round trip. to lex something of your own, hand it a string
+
+```holyc
 ExodusLexDemo("I64 x=42; F64 pi=3.14; \"hello\";");
 ```
+
+keep that one in a file and include the file. typed straight at the GUI
+command line the escaped quotes can get chewed up before the compiler
+ever sees them, which surfaces as a parse error sitting on a `"` or an
+include path that grew a trailing slash. CLI mode (`exodus -c`) takes
+the same line verbatim.
 
 or from your own HolyC code, after declaring the two classes (copy them
 out of `T/Demo/ExodusLexDemo.HC`)
