@@ -28,11 +28,13 @@ U0 ExodusLexDemo(U8 *src=NULL)
   if (!src)
     src="I64 x=42; F64 f=3.14; \"hello\";";
   ExodusLexResult *res=ExodusLex(src);
+  "Source : %s\n",src;
   if (!res) {
-    "ExodusLex returned NULL (HCRT not loaded?)\n";
+    // Lex threw on the source and has already printed why, or the
+    // HCRT image is older than the bridge patches
+    "ExodusLex returned NULL\n";
     return;
   }
-  "Source : %s\n",src;
   "Tokens : %d\n",res->count;
   I64 i;
   for (i=0;i<res->count;i++) {
@@ -60,3 +62,12 @@ ExodusLexDemo("\"a\\0b\";");
 // Lex expands defines, so pi never reaches you as an identifier, it
 // arrives as the (0x400921FB54442D18(F64)) it is declared to be.
 ExodusLexDemo("F64 d=pi;");
+// #define works inside one source and stays there. the bridge lexes
+// against a scratch table, so nothing lands in this task's symbols and
+// the second call sees a plain identifier again.
+ExodusLexDemo("#define EXODUS_LEX_DEMO_N 7\nEXODUS_LEX_DEMO_N;");
+ExodusLexDemo("EXODUS_LEX_DEMO_N;");
+// a source Lex throws on (char consts stop at 8 chars) comes back as
+// NULL instead of unwinding through the C bridge and out of this file.
+ExodusLexDemo("'abcdefghijk'");
+"ExodusLexDemo: done\n";

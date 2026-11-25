@@ -22,7 +22,7 @@
 #define TK_F64        0x104
 
 /* partial mirror of HolyC's class CCmpCtrl (T/KernelA.HH). we only ever
- * touch the prefix up through last_line_num and treat the rest as opaque,
+ * read the prefix up through last_line_num and treat the rest as opaque,
  * but the layout has to line up with the HolyC declaration exactly. */
 typedef struct HCCmpCtrlHead {
   void *next, *last;   /* CCmpCtrl *next, *last */
@@ -50,48 +50,49 @@ static void *resolve_sym(char const *name) {
 ExodusLexResult *ExodusLex(char const *src) {
   if (!src)
     src = "";
-  void *fp_new = resolve_sym("CmpCtrlNew");
-  void *fp_lex = resolve_sym("Lex");
-  void *fp_del = resolve_sym("CmpCtrlDel");
+  /* the HolyC half lives in T/Compiler/ExodusLex.HC: ExodusLexNew is
+   * CmpCtrlNew plus a scratch table for the source's #defines,
+   * ExodusLexTry is Lex inside a try/catch, ExodusLexDel frees both.
+   * a HolyC throw unwinds like longjmp, straight past any C frame in
+   * the way, so calling Lex bare would leak the result and the
+   * CCmpCtrl on every lex error and kill the task we run on. */
+  void *fp_new = resolve_sym("ExodusLexNew");
+  void *fp_lex = resolve_sym("ExodusLexTry");
+  void *fp_del = resolve_sym("ExodusLexDel");
   if (!fp_new || !fp_lex || !fp_del)
-    return NULL; /* HCRT isn't loaded */
+    return NULL; /* HCRT isn't loaded, or was built before the patches */
 
-  /* the buffer has to live on HolyC's heap because CmpCtrlDel and
-   * LexFilePop will Free it for us unless CCF_DONT_FREE_BUF is set. */
+  /* the buffer has to live on HolyC's heap, the CCmpCtrl takes it over
+   * and LexFilePop will Free it when ExodusLexDel runs. */
   size_t len = strlen(src) + 1;
   u8 *hbuf = HolyMAlloc(len);
   if (!hbuf)
     return NULL;
   memcpy(hbuf, src, len);
 
-  /* CCmpCtrl *CmpCtrlNew(U8 *buf=NULL, I64 flags=0, U8 *filename=NULL) */
-  HCCmpCtrlHead *cc =
-      (HCCmpCtrlHead *)fficall(fp_new, hbuf, (i64)0, (void *)0);
+  void *scratch = NULL; /* CHashTable holding this source's #defines */
+  HCCmpCtrlHead *cc = (HCCmpCtrlHead *)fficall(fp_new, hbuf, &scratch);
   if (!cc) {
     HolyFree(hbuf);
     return NULL;
   }
 
   ExodusLexResult *res = calloc(1, sizeof *res);
-  if (!res) {
-    fficall(fp_del, cc);
-    return NULL;
-  }
+  if (!res)
+    goto fail;
   size_t cap = 64;
   res->tokens = calloc(cap, sizeof *res->tokens);
-  res->count = 0;
-  if (!res->tokens) {
-    fficall(fp_del, cc);
-    free(res);
-    return NULL;
-  }
+  if (!res->tokens)
+    goto fail;
 
   for (;;) {
     i64 tk = fficall(fp_lex, cc);
+    if (tk < 0)
+      goto fail; /* Lex threw, HolyC already printed why */
     if (res->count == cap) {
       ExodusToken *grown = realloc(res->tokens, 2 * cap * sizeof *res->tokens);
       if (!grown)
-        goto oom;
+        goto fail;
       res->tokens = grown;
       memset(res->tokens + cap, 0, cap * sizeof *res->tokens);
       cap *= 2;
@@ -120,7 +121,7 @@ ExodusLexResult *ExodusLex(char const *src) {
           plen--;
         out->str = malloc((size_t)plen + 1);
         if (!out->str)
-          goto oom;
+          goto fail;
         memcpy(out->str, cc->cur_str, (size_t)plen);
         out->str[plen] = 0;
         out->str_len = plen;
@@ -133,11 +134,11 @@ ExodusLexResult *ExodusLex(char const *src) {
       break;
   }
 
-  fficall(fp_del, cc);
+  fficall(fp_del, cc, scratch);
   return res;
 
-oom:
-  fficall(fp_del, cc);
+fail:
+  fficall(fp_del, cc, scratch);
   ExodusLexFree(res);
   return NULL;
 }
@@ -162,13 +163,19 @@ void ExodusLexFree(ExodusLexResult *res) {
 
 int main(int argc, char **argv); /* the stock entry point, same DSO */
 
-static SDL_mutex *lex_slot_mu;   /* serializes remote callers */
-static SDL_sem *lex_req_sem;     /* posted when a request is placed */
-static SDL_sem *lex_done_sem;    /* posted when the request is served */
-static SDL_sem *lex_ready_sem;   /* posted once by the first poll */
+static SDL_SpinLock lex_boot_spin; /* guards creation of lex_boot_mu only */
+static SDL_mutex *lex_boot_mu;     /* serializes ExodusLexBoot callers */
+static SDL_mutex *lex_slot_mu;     /* serializes remote callers */
+static SDL_sem *lex_req_sem;       /* posted when a request is placed */
+static SDL_sem *lex_done_sem;      /* posted when the request is served */
+static SDL_sem *lex_ready_sem;     /* posted by the first poll, or by the
+                                    * boot thread if main() gave up */
 static char const *lex_req_src;
 static ExodusLexResult *lex_req_res;
-static int lex_boot_started, lex_live;
+static SDL_atomic_t lex_live;      /* server task is polling */
+static SDL_atomic_t lex_boot_dead; /* main() returned, nothing will come up */
+static SDL_threadID lex_server_tid;
+static int lex_boot_started;       /* under lex_boot_mu */
 
 static int lex_boot_thread(void *arg) {
   /* SDL starts its threads with signals blocked and everything Exodus
@@ -180,23 +187,29 @@ static int lex_boot_thread(void *arg) {
   int argc = 0;
   while (argv[argc])
     argc++;
-  return main(argc, argv); /* EventLoop never returns */
+  /* EventLoop never returns, so getting here means main() bailed out
+   * before the runtime started (missing T root or HCRT image, bad
+   * args). wake ExodusLexBoot now instead of letting it time out. */
+  int rc = main(argc, argv);
+  SDL_AtomicSet(&lex_boot_dead, 1);
+  SDL_SemPost(lex_ready_sem);
+  return rc;
 }
 
-int ExodusLexBoot(char const *t_root, char const *hcrt_bin) {
-  if (lex_boot_started)
-    return lex_live ? 0 : -1;
+static int lex_boot_locked(char const *t_root, char const *hcrt_bin) {
+  if (lex_boot_started) {
+    /* a boot that timed out may still come up late, so look again */
+    return SDL_AtomicGet(&lex_live) ? 0 : -1;
+  }
   lex_boot_started = 1;
   if (!t_root)
     t_root = "T";
   if (!hcrt_bin)
     hcrt_bin = "HCRT.BIN";
-  lex_slot_mu = SDL_CreateMutex();
-  lex_req_sem = SDL_CreateSemaphore(0);
-  lex_done_sem = SDL_CreateSemaphore(0);
-  lex_ready_sem = SDL_CreateSemaphore(0);
-  if (!lex_slot_mu || !lex_req_sem || !lex_done_sem || !lex_ready_sem)
-    return -1;
+  SDL_mutex *mu = SDL_CreateMutex();
+  SDL_sem *req = SDL_CreateSemaphore(0);
+  SDL_sem *done = SDL_CreateSemaphore(0);
+  SDL_sem *ready = SDL_CreateSemaphore(0);
   static char *boot_argv[8];
   boot_argv[0] = "exodus";
   boot_argv[1] = "-c";
@@ -206,8 +219,14 @@ int ExodusLexBoot(char const *t_root, char const *hcrt_bin) {
   boot_argv[5] = strdup(hcrt_bin);
   boot_argv[6] = "T:/Demo/ExodusLexServer.HC";
   boot_argv[7] = NULL;
-  if (!boot_argv[3] || !boot_argv[5])
+  if (!mu || !req || !done || !ready || !boot_argv[3] || !boot_argv[5])
     return -1;
+  /* publish these only once all of them exist, and before the thread
+   * that will poll them does */
+  lex_slot_mu = mu;
+  lex_req_sem = req;
+  lex_done_sem = done;
+  lex_ready_sem = ready;
   SDL_Thread *th =
       SDL_CreateThread(lex_boot_thread, "exodus_lex_boot", boot_argv);
   if (!th)
@@ -216,29 +235,54 @@ int ExodusLexBoot(char const *t_root, char const *hcrt_bin) {
   /* HCRT boots in well under a second; 30s leaves room for cold disks */
   if (SDL_SemWaitTimeout(lex_ready_sem, 30000) != 0)
     return -1;
-  return 0;
+  return SDL_AtomicGet(&lex_live) ? 0 : -1;
+}
+
+int ExodusLexBoot(char const *t_root, char const *hcrt_bin) {
+  SDL_AtomicLock(&lex_boot_spin);
+  if (!lex_boot_mu)
+    lex_boot_mu = SDL_CreateMutex();
+  SDL_AtomicUnlock(&lex_boot_spin);
+  if (!lex_boot_mu)
+    return -1;
+  /* a second caller waits here for the first boot to settle and then
+   * gets the same answer */
+  SDL_LockMutex(lex_boot_mu);
+  int rc = lex_boot_locked(t_root, hcrt_bin);
+  SDL_UnlockMutex(lex_boot_mu);
+  return rc;
 }
 
 ExodusLexResult *ExodusLexRemote(char const *src) {
-  if (!lex_live)
+  if (!SDL_AtomicGet(&lex_live))
     return NULL;
+  /* called on the server's own core thread, i.e. from HolyC. waiting
+   * for the server task here would park the very thread it runs on,
+   * and we're already in HolyC context anyway, so lex in place. */
+  if (SDL_ThreadID() == lex_server_tid)
+    return ExodusLex(src);
   SDL_LockMutex(lex_slot_mu);
   lex_req_src = src;
   SDL_SemPost(lex_req_sem);
   SDL_SemWait(lex_done_sem);
   ExodusLexResult *res = lex_req_res;
   lex_req_res = NULL;
+  lex_req_src = NULL;
   SDL_UnlockMutex(lex_slot_mu);
   return res;
 }
 
 i64 ExodusLexPoll(void) {
-  if (!lex_live) {
-    lex_live = 1;
-    if (lex_ready_sem)
-      SDL_SemPost(lex_ready_sem);
+  /* no ExodusLexBoot in this process (someone ran the server loop
+   * inside a plain exodus): nothing can ever be pending */
+  if (!lex_ready_sem)
+    return 0;
+  if (!SDL_AtomicGet(&lex_live)) {
+    lex_server_tid = SDL_ThreadID();
+    SDL_AtomicSet(&lex_live, 1);
+    SDL_SemPost(lex_ready_sem);
   }
-  if (!lex_req_sem || SDL_SemTryWait(lex_req_sem) != 0)
+  if (SDL_SemTryWait(lex_req_sem) != 0)
     return 0;
   lex_req_res = ExodusLex(lex_req_src);
   SDL_SemPost(lex_done_sem);

@@ -1,6 +1,7 @@
 cabal-version:      2.2
 name:               exodus-lex
 version:            0.1.0.0
+category:           Language
 synopsis:           Haskell bindings to Exodus's HolyC lexer bridge
 description:
   Drives the HolyC `Lex` routine via Exodus's C bridge and returns the
@@ -9,10 +10,23 @@ description:
   Requires libexodus_lex (built by the Exodus CMake project with
   -DBUILD_EXODUS_LEX_SHARED=ON, default ON) to be available at link
   and run time.
-license:            BSD-3-Clause
+-- same terms as Exodus itself (zlib), see the upstream LICENSE
+license:            Zlib
 author:             Exodus contributors
 maintainer:         exodus@example.invalid
 build-type:         Simple
+
+-- libexodus_lex has to be found twice, by the linker and by the loader.
+-- from the haskell/ directory of an Exodus checkout that was built into
+-- build/, both are covered by
+--
+--   cabal build --extra-lib-dirs=$PWD/../build/src/exodus
+--   LD_LIBRARY_PATH=$PWD/../build/src/exodus \
+--     cabal run exodus-lex-demo -- ../T ../HCRT.BIN
+--
+-- (PATH on Windows, DYLD_LIBRARY_PATH on macOS). the demo takes the
+-- T root and the HCRT image as arguments, T and HCRT.BIN in the
+-- current directory if you leave them out.
 
 library
   hs-source-dirs:     .
@@ -22,8 +36,9 @@ library
   extra-libraries:    exodus_lex
   ghc-options:        -Wall
 
-  -- If libexodus_lex is not on the system loader path, point the linker
-  -- at it. Adjust EXODUS_BUILD to your CMake build directory.
-  --
-  -- extra-lib-dirs: ../build/src/exodus
-  -- ld-options:     -Wl,-rpath,$ORIGIN/../build/src/exodus
+executable exodus-lex-demo
+  hs-source-dirs:     demo
+  main-is:            Main.hs
+  default-language:   Haskell2010
+  build-depends:      base, exodus-lex
+  ghc-options:        -Wall -threaded

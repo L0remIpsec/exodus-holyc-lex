@@ -1,0 +1,12 @@
+diff --git a/T/Compiler/CMP_PRJ.HC b/T/Compiler/CMP_PRJ.HC
+index 4f111d2..74aaf6e 100644
+--- a/T/Compiler/CMP_PRJ.HC
++++ b/T/Compiler/CMP_PRJ.HC
+@@ -10,6 +10,7 @@ CCmpGlbls	cmp;
+ #include "LEX.HC"
+ CUAsmGlbls	uasm;
+ #include "CHASH.HC"
++#include "ExodusLex.HC"
+ #include "UAsm.HC"
+ #include "PRSLIB.HC"
+ #include "AsmInit.HC"

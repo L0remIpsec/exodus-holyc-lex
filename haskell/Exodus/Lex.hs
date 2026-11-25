@@ -8,6 +8,16 @@
 -- 'withLex' hand sources to its HolyC server task and block until the
 -- tokens come back.
 --
+-- source and payload strings cross the bridge as raw bytes, one 'Char'
+-- per byte (Latin-1 style, code points 0 to 255, anything above is cut
+-- down to its low byte on the way in). HolyC is not UTF-8,
+-- KernelA.HH for one spells pi as a lone 0xE3 byte, so decoding through
+-- the locale would mangle or drop anything outside ASCII.
+--
+-- this is the real HolyC Lex, preprocessor included: @#include@ reads
+-- files and @#exe{}@ runs HolyC inside your process. don't lex source
+-- you wouldn't be willing to compile.
+--
 -- link against libexodus_lex (built by the Exodus CMake project with
 -- BUILD_EXODUS_LEX_SHARED=ON, which is the default) by way of
 -- extra-libraries: exodus_lex in the cabal file.
@@ -32,7 +42,8 @@ import           Prelude            hiding (lex)
 
 import           Control.Exception  (bracket)
 import           Data.Int           (Int64)
-import           Foreign.C.String   (CString, peekCStringLen, withCString)
+import           Foreign.C.String   (CString, peekCAStringLen, withCAString,
+                                     withCString)
 import           Foreign.C.Types    (CDouble (..), CInt (..), CSize (..))
 import           Foreign.Marshal.Array (peekArray)
 import           Foreign.Ptr        (Ptr, nullPtr)
@@ -123,9 +134,11 @@ tkF64       = 0x104
 
 -- | boot the in-process Exodus runtime. @boot root bin@ mounts @root@
 -- as T:/ and loads the HolyC image @bin@, both resolved against the
--- current working directory. call it once; True means the runtime is
--- up (again). there is no shutdown, the runtime lives until the
--- process exits.
+-- current working directory. True means the runtime is up; calling it
+-- again after that is harmless and stays True. False comes back
+-- straight away when either path is missing, and a failed boot can't
+-- be retried in the same process. there is no shutdown, the runtime
+-- lives until the process exits.
 boot :: FilePath -> FilePath -> IO Bool
 boot root bin =
   withCString root $ \croot ->
@@ -133,7 +146,10 @@ boot root bin =
       (== 0) <$> c_ExodusLexBoot croot cbin
 
 -- | lex some HolyC source and return every token, minus the trailing
--- TK_EOF. returns @Nothing@ if 'boot' hasn't succeeded yet.
+-- TK_EOF. returns @Nothing@ if 'boot' hasn't succeeded yet or if the
+-- HolyC lexer rejected the source (an over long char constant, a
+-- throw out of an @#exe{}@ block). safe to call from several Haskell
+-- threads, requests queue up on the one HolyC server task.
 lex :: String -> IO (Maybe [Token])
 lex src = withLex src return
 
@@ -141,7 +157,7 @@ lex src = withLex src return
 -- and frees the underlying C buffer once it's done.
 withLex :: String -> ([Token] -> IO a) -> IO (Maybe a)
 withLex src k =
-  withCString src $ \csrc ->
+  withCAString src $ \csrc ->
     bracket (c_ExodusLexRemote csrc) freeIfNotNull $ \resPtr ->
       if resPtr == nullPtr
         then return Nothing
@@ -178,6 +194,7 @@ decode CExodusToken{..} = do
   where
     -- read exactly str_len bytes; TK_STR payloads may contain embedded
     -- NULs (\0 and \xNN escapes) that a plain peekCString would drop.
+    -- byte for byte, no locale decoding (see the module header).
     peekStr
       | ctStr == nullPtr = pure ""
-      | otherwise        = peekCStringLen (ctStr, fromIntegral ctStrLen)
+      | otherwise        = peekCAStringLen (ctStr, fromIntegral ctStrLen)

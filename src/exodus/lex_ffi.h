@@ -37,13 +37,26 @@ typedef struct ExodusLexResult {
 
 /* lex src (a zero terminated HolyC source string) and return a heap
  * allocated result with one entry per token. the last entry always has
- * .token == TK_EOF (0). returns NULL if the HolyC runtime hasn't been
- * loaded yet. caller owns the result and must hand it to ExodusLexFree.
+ * .token == TK_EOF (0). caller owns the result and must hand it to
+ * ExodusLexFree.
+ *
+ * returns NULL when
+ *   - the HolyC runtime isn't loaded, or its HCRT image predates the
+ *     bridge patches (no T/Compiler/ExodusLex.HC in it),
+ *   - Lex threw on the source (HolyC prints the reason itself), or
+ *   - memory ran out.
+ *
+ * this is the real HolyC Lex, preprocessor included: #define applies
+ * for the rest of the source (and only there, each call gets a scratch
+ * symbol table), #include reads files and #exe{} runs HolyC. don't
+ * feed it source you wouldn't be willing to compile.
+ *
  * only call this from HolyC context (a task Exodus made), foreign
  * threads go through ExodusLexRemote instead. */
 EXODUS_API ExodusLexResult *ExodusLex(char const *src);
 
-/* free a result previously returned by ExodusLex. safe to call on NULL. */
+/* free a result previously returned by ExodusLex or ExodusLexRemote.
+ * safe to call on NULL. plain C frees, callable from any thread. */
 EXODUS_API void ExodusLexFree(ExodusLexResult *res);
 
 /* boot a full Exodus runtime inside the calling process so that
@@ -54,13 +67,21 @@ EXODUS_API void ExodusLexFree(ExodusLexResult *res);
  * resolve against the host's working directory; NULL picks the usual
  * "T" and "HCRT.BIN". one boot per process and there is no shutdown,
  * the runtime lives until the process exits (and HolyC Exit/Shutdown
- * ends the whole process). returns 0 on success. */
+ * ends the whole process).
+ *
+ * returns 0 once the server is up, nonzero if it isn't: straight away
+ * when t_root or hcrt_bin can't be found, after 30s if the runtime
+ * started but the server never reported in. a failed boot can't be
+ * retried with other paths. safe to call from several threads, later
+ * callers wait for the first and get the same answer. */
 EXODUS_API int ExodusLexBoot(char const *t_root, char const *hcrt_bin);
 
-/* lex src on the runtime's server task from any host thread. requests
- * serialize through the one server task. returns NULL until
- * ExodusLexBoot has succeeded. don't call this from HolyC code (it
- * would deadlock the server task), use ExodusLex there. */
+/* ExodusLex from any host thread: hands src to the runtime's server
+ * task and blocks until the tokens come back. same result and same
+ * NULL cases as ExodusLex, plus NULL until ExodusLexBoot has
+ * succeeded, and lex errors are silent here (the server task doesn't
+ * print). thread safe, requests serialize through the one server
+ * task. src only has to stay valid for the duration of the call. */
 EXODUS_API ExodusLexResult *ExodusLexRemote(char const *src);
 
 /* answers one pending ExodusLexRemote request, never blocks. returns 1

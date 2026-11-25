@@ -7,6 +7,11 @@
 U0 ExodusLexServer()
 {
   "ExodusLexServer: up\n";
+  // the host owns stdout from here on. a source Lex rejects comes back
+  // to it as NULL, the ERROR line HolyC would print for it only ever
+  // landed in the middle of the host's own output (and command line
+  // mode leaks a little on every char printed that way).
+  Silent;
   while (TRUE)
     if (!ExodusLexPoll)
       Sleep(1);
